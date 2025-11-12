@@ -1,0 +1,379 @@
+---
+title: "ST558 HW 9 - Modeling Practice (HW 8 cont.)"
+format: html
+editor: visual
+---
+
+# HW 8 - Basic Modeling Practice
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#| warning: FALSE
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(janitor)
+library(corrplot)
+library(tidymodels)
+```
+
+## Basic Modeling Practice
+
+### Reading Data
+
+Today we will do some structured practice with fitting linear models in R. The data set we will be using is about bike sharing rentals in Seoul, South Korea. Let's begin by reading in this data.
+
+```{r}
+bike_data <- read_csv("SeoulBikeData.csv", locale = locale(encoding="latin1")) # Locale solves problems with special characters in other languages.
+```
+
+### EDA
+
+#### Data Processing
+
+Before we go fitting any models, we will conduct some basic data cleaning to prepare our data for usage. First, we will check for missing values and verify data types to make sure the columns were read in correctly.
+
+```{r}
+# Check structure of data
+str(bike_data)
+
+# Check for missing values
+colSums(is.na(bike_data)) 
+```
+
+We can see that none of the columns have missing values! However, we should note that the `Date` column has been read in as a character type, so we will need to process this column further. The categorical variables `Seasons`, `Holiday`, and `Functioning Day` have also been read in as character type, so we will convert them to factor type for later analysis. The `Date` column is currently stored as a character string with the format day/month/year. We will convert it into a usable date object using the `lubridate` library.
+
+```{r Date Conversion}
+bike_data <- bike_data |>
+  mutate(Date = dmy(Date))
+```
+
+Next, we will make sure that the categorical variables are read as factors.
+
+```{r Characters to Factors}
+bike_data <- bike_data |>
+  mutate(Seasons = as.factor(Seasons),
+         Holiday = as.factor(Holiday),
+         `Functioning Day` = as.factor(`Functioning Day`))
+
+head(bike_data)
+```
+
+Finally, we will rename all the variables to have more "user-friendly" names. For example, a column name like "Functioning Day" is not currently user-friendly because of the space between the words.
+
+```{r}
+bike_data <- bike_data |>
+  clean_names() # Replaces all spaces with '_' and makes all letters lowercase.
+
+names(bike_data)
+```
+
+#### Exploratory Data Analysis
+
+Now that the bike data has been cleaned up, we can begin some basic exploratory data analysis (EDA). Let's start by creating some summary statistics as they relate to the bike rental count. We will view these statistics across some categorical variables as well.
+
+```{r}
+# Summary of rented_bike_count variable.
+summary(bike_data$rented_bike_count)
+
+# Find unique values for each categorical variable
+unique(bike_data$seasons)
+unique(bike_data$holiday)
+unique(bike_data$functioning_day)
+```
+
+Since the `functioning_day` variable only has Yes or No values, this means that the bike sharing system was either operable or inoperable that hour. If the system was inoperable, then we get no useful information about bike rentals for that hour. In this case, we will remove observations that show the system was not operating.
+
+```{r}
+table(bike_data$functioning_day) # 295 "No " observations
+
+bike_data <- bike_data |>
+  filter(functioning_day == "Yes")
+```
+
+The data is currently given as hourly observations. We will summarize across the hours so that each day has one observation associated with it. We will also group the data by `date`, `seasons`, and `holiday`. We will find the sum of the `rented_bike_count`, `rainfall`, and `snowfall` variables. Finally, we will included the mean of all the weather related variables.
+
+```{r}
+daily_bike_data <- bike_data %>%
+  group_by(date, seasons, holiday) %>%
+  summarise(
+    total_bike_count = sum(rented_bike_count),
+    avg_temp_c = mean(temperature_c, na.rm = TRUE),
+    avg_humidity_pct = mean(humidity_percent, na.rm = TRUE),
+    avg_windspeed_m_s = mean(wind_speed_m_s, na.rm = TRUE),
+    avg_visibility_10m = mean(visibility_10m, na.rm = TRUE),
+    avg_dew_point_temp_c = mean(dew_point_temperature_c, na.rm = TRUE),
+    avg_solar_radiation_mj_m2 = mean(solar_radiation_mj_m2, na.rm = TRUE),
+    total_rainfall_mm = sum(rainfall_mm, na.rm = TRUE),
+    total_snowfall_cm = sum(snowfall_cm, na.rm = TRUE)
+  )
+
+head(daily_bike_data)
+```
+
+Now, we have a `daily_bike_data` tibble, which will be our new data that we will analyze! Let's recreate our basic summary statistics and then create some plots to explore variable relationships. We can also view a correlation matrix between our numeric variables to see if the data shows any significant correlations.
+
+```{r}
+# Summary of total_bike_count variable on a given day of the year.
+summary(daily_bike_data$total_bike_count)
+```
+
+```{r Corr Plot}
+num_vars <- daily_bike_data[ , 4:12]
+
+corrplot(cor(num_vars))
+```
+
+By looking at the correlation plot above, we can see that the total bike rental count has a strong, positive correlation with the average temperature and solar radiation. This makes sense because we can easily imagine more bikes being rented on a warm, sunny day rather than a cold, cloudy day.
+
+#### Split the Data
+
+Now, we will move on to splitting our `daily_bike_data` into training and testing sets (75/25 split).
+
+```{r Splitting}
+set.seed(75)
+
+bike_split <- initial_split(daily_bike_data, prop = 0.75, strata = seasons)
+bike_train <- training(bike_split)
+bike_test <- testing(bike_split)
+```
+
+We will also create a 10 fold cross-validation (CV) split on the training set.
+
+```{r 10 Fold CV}
+bike_folds <- vfold_cv(bike_train, v = 10)
+```
+
+#### Fitting MLR Models
+
+Our bike data is now ready for fitting linear regression models! First, let’s create some recipes.
+
+For the 1st recipe, let’s ignore the `date` variable for modeling and instead use it to create a weekday/weekend (factor) variable.
+
+```{r Recipe 1}
+bike_recipe_1 <- recipe(total_bike_count ~ ., data = bike_train) |>
+  step_log(total_bike_count, base = exp(1)) |> # Added log for scaling purposes.
+  
+  update_role(date, new_role = "ID") |> # Give 'date' an ID to keep it, but not for modeling.
+  step_date(date, features = "dow", label = TRUE) |> # Pull out week days from date.
+  
+  # Create new weekday/weekend factor variable.
+  step_mutate(
+    day_type = factor(dplyr::if_else(date_dow %in% c("Sat", "Sun"), "weekend", "weekday"))) |>
+  
+  step_rm(date_dow) |> # Remove intermediate day of week variable.
+  step_dummy(all_nominal_predictors()) |> # Dummy variables for cat vars.
+  step_normalize(all_numeric_predictors()) |> # Standardize num vars.
+  step_zv(all_predictors()) # For zero-variance predictor that has no information within the column.
+
+# Check summary
+summary(bike_recipe_1)
+```
+
+For the 2nd recipe, we will repeat the steps above, as in recipe 1, but now we will add in **interactions** between seasons and holiday, seasons and temp, temp and rainfall.
+
+```{r Recipe 2}
+bike_recipe_2 <- recipe(total_bike_count ~ ., data = bike_train) |>
+  update_role(date, new_role = "ID") |> # Give 'date' an ID
+  step_date(date, features = "dow", label = TRUE) |> # Pull out week days
+  
+  # Create weekday/weekend variable
+  step_mutate(
+    day_type = factor(if_else(date_dow %in% c("Sat", "Sun"), "weekend", "weekday"))) |>
+  
+  step_rm(date_dow) |> # Remove intermediate variable
+  
+# Interactions
+  step_interact( ~ starts_with("seasons_"):starts_with("holiday_")) |> # seasons x holiday
+  step_interact( ~ starts_with("seasons_"):starts_with("avg_temp_c")) |> # seasons x temp
+  step_interact( ~ starts_with("avg_temp_c"):starts_with("total_rainfall_mm")) |> # temp x rainfall
+  
+  step_dummy(all_nominal_predictors()) |> # Dummy variables
+  step_normalize(all_numeric_predictors()) |> # Standardize
+  step_zv(all_predictors())
+
+summary(bike_recipe_2)
+```
+
+For the 3rd and final recipe, we will repeat the steps above, as in recipe 2, but now we will add in **quadratic terms** for each numeric predictor.
+
+```{r Recipe 3}
+bike_recipe_3 <- recipe(total_bike_count ~ ., data = bike_train) |>
+  update_role(date, new_role = "ID") |> # Give 'date' an ID
+  step_date(date, features = "dow", label = TRUE) |> # Pull out week days
+  
+  # Create weekday/weekend variable
+  step_mutate(
+    day_type = factor(if_else(date_dow %in% c("Sat", "Sun"), "weekend", "weekday"))) |>
+  
+  step_rm(date_dow) |> # Remove intermediate variable
+  
+  step_poly(all_numeric_predictors(), degree = 2) |> # ADD IN QUADRATIC TERMS
+  
+# Interactions
+  step_interact( ~ starts_with("seasons_"):starts_with("holiday_")) |> # seasons x holiday
+  step_interact( ~ starts_with("seasons_"):starts_with("avg_temp_c")) |> # seasons x temp
+  step_interact( ~ starts_with("avg_temp_c"):starts_with("total_rainfall_mm")) |> # temp x rainfall
+  
+  step_dummy(all_nominal_predictors()) |> # Dummy variables
+  step_normalize(all_numeric_predictors()) |> # Standardize
+  step_zv(all_predictors())
+
+summary(bike_recipe_3)
+```
+
+Finally, we will set up our linear model fit to use the “lm” engine. We will fit the models using 10 fold CV, then consider the training set CV error to choose a best model.
+
+```{r Additional Packages}
+library(parsnip)
+library(workflows)
+library(broom)
+```
+
+Here, we will start by building a model specification. As stated earlier, we will be using a *linear model* on our bike data.
+
+```{r Model Specification}
+lm_mod <- 
+  linear_reg() |> 
+  set_engine("lm")
+```
+
+Then, we can create some model workflows, which pair models and recipes together. We will need to do this for all three recipes.
+
+```{r Workflows}
+bike_wf1 <- 
+  workflow() |>
+  add_model(lm_mod) |>
+  add_recipe(bike_recipe_1)
+
+bike_wf2 <- 
+  workflow() |>
+  add_model(lm_mod) |>
+  add_recipe(bike_recipe_2)
+
+bike_wf3 <- 
+  workflow() |>
+  add_model(lm_mod) |>
+  add_recipe(bike_recipe_3)
+```
+
+Next, we will fit the models using 10 fold CV.
+
+```{r}
+set.seed(75)
+
+cv_wf1 <- bike_wf1 |>
+  fit_resamples(bike_folds)
+
+cv_wf2 <- bike_wf2 |>
+  fit_resamples(bike_folds)
+
+cv_wf3 <- bike_wf3 |>
+  fit_resamples(bike_folds)
+```
+
+Now, we can look at the training set CV error to choose our best model.
+
+```{r Observe RMSE}
+collect_metrics(cv_wf1)
+collect_metrics(cv_wf2)
+collect_metrics(cv_wf3) # Lowest RMSE
+```
+
+Since our third model seems to have the lowest RMSE, we will fit this model to the entire training data set. Then, we will compute the RMSE metric on the test set.
+
+```{r}
+best_fit <- bike_wf3 |>
+  last_fit(bike_split)
+
+best_fit |> collect_metrics()
+```
+
+To end, we will obtain the final model (fit on the entire training set) coefficient table.
+
+```{r}
+final_model_coeffs <- best_fit |>
+  extract_fit_parsnip() |>
+  tidy()
+
+final_model_coeffs
+```
+
+
+
+# HW 9 - Modeling Practice
+
+## LASSO Model
+Add to your previous document where you fit multiple linear regression models using 10 fold cross-validation.
+You should add (using the first recipe):
+  • a (tuned) LASSO model (note: I got all the same RMSE values for every tuning value)
+  • a (tuned) Regression Tree model
+  • a (tuned) Bagged Tree model
+  • a (tuned) Random Forest model
+  
+Each of these models should be fit and tuned on the training set. You should take the best model from each family of models (best LASSO, best Regression tree,. . . ) and fit it to the entire training data set and see how it predicts on the test set. Include your best MLR model from the last homework here.
+  • Compare all final models on the test set using both RMSE and MAE (mean absolute error).
+  • Extract the final model fits for each type and report a summary of each model
+    – For the LASSO and MLR models, report the final coefficient tables
+    – For the regression tree model, give a plot of the final fit
+    – For the bagged tree and random forest models, produce a variable importance plot
+      ∗ For the random forest model, this is a bit complicated. Check this out and see if you can get it to work.
+      
+For the overall best model, fit it to the entire data set!
+```{r}
+library(tune)
+library(glmnet)
+library(dials)
+```
+
+
+In this section, we will be working off of the analysis we previously did in homework 8. Using the first recipe we came up with, we will add several new models. We will begin by adding a LASSO model to fit on our bike data. In this case, we will still be using linear regression, but we will be using the "glmnet" engine instead of "lm".
+```{r}
+LASSO_recipe <- bike_recipe_1
+
+LASSO_spec <- linear_reg(penalty = tune(), mixture = 1) |>
+  set_engine("glmnet")
+```
+
+Next, we will create our workflow.
+```{r}
+LASSO_wkf <- workflow() |>
+  add_recipe(LASSO_recipe) |>
+  add_model(LASSO_spec)
+LASSO_wkf
+```
+
+Below, we will use the `tune_grid()` function. This function allows us to fit the model to CV folds but specify the set of tuning parameters to consider.
+```{r LASSO workflow}
+set.seed(75)
+
+LASSO_grid <- LASSO_wkf |>
+  tune_grid(resamples = bike_folds,
+            grid = grid_regular(penalty(), levels = 150)) 
+LASSO_grid
+```
+
+Now, we want these metrics computed across the folds for each of our 150 values of the tuning parameter.
+```{r}
+LASSO_grid |>
+  collect_metrics() |>
+  filter(.metric == "rmse")
+```
+
+We will find the best model from our LASSO models and fit it to the entire training data set and see how it predicts on the test set.
+```{r}
+best_LASSO <- LASSO_grid |> 
+  select_best(metric = "rmse")
+
+LASSO_final <- finalize_workflow(LASSO_wkf, best_LASSO)
+
+LASSO_last_fit <- last_fit(LASSO_final, bike_split) # Fit on entire training set
+
+collect_metrics(LASSO_last_fit)
+```
+
+## Regression Tree Model
+
+
