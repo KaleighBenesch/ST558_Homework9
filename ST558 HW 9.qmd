@@ -332,7 +332,7 @@ library(baguette)
 
 
 In this section, we will be working off of the analysis we previously did in homework 8. Using the first recipe we came up with, we will add several new models. We will begin by adding a **LASSO model** to fit on our bike data. In this case, we will still be using linear regression, but we will be using the "glmnet" engine instead of "lm".
-```{r}
+```{r LASSO spec}
 LASSO_recipe <- bike_recipe_1
 
 LASSO_spec <- linear_reg(penalty = tune(), mixture = 1) |>
@@ -340,7 +340,7 @@ LASSO_spec <- linear_reg(penalty = tune(), mixture = 1) |>
 ```
 
 Next, we will create our workflow.
-```{r}
+```{r LASSO wkf}
 LASSO_wkf <- workflow() |>
   add_recipe(LASSO_recipe) |>
   add_model(LASSO_spec)
@@ -348,7 +348,7 @@ LASSO_wkf
 ```
 
 Below, we will use the `tune_grid()` function. This function allows us to fit the model to CV folds but specify the set of tuning parameters to consider.
-```{r LASSO workflow}
+```{r LASSO grid}
 set.seed(75)
 
 LASSO_grid <- LASSO_wkf |>
@@ -357,14 +357,14 @@ LASSO_grid <- LASSO_wkf |>
 ```
 
 Now, we want these metrics computed across the folds for each of our 150 values of the tuning parameter.
-```{r}
+```{r LASSO metric}
 LASSO_grid |>
   collect_metrics() |>
   filter(.metric == "rmse")
 ```
 
 We will find the best model from our LASSO models and fit it to the entire training data set and see how it predicts on the test set.
-```{r}
+```{r LASSO finalize & fit}
 best_LASSO <- LASSO_grid |> 
   select_best(metric = "rmse")
 
@@ -376,7 +376,7 @@ LASSO_final <- LASSO_wkf |>
 ## Regression Tree Model
 
 We will repeat the same steps, but instead use a **regression tree model**. First, we’ll define our recipe and model specifications.
-```{r}
+```{r Tree spec}
 tree_recipe <- bike_recipe_1
 
 tree_mod <- decision_tree(tree_depth = tune(),
@@ -387,7 +387,7 @@ tree_mod <- decision_tree(tree_depth = tune(),
 ```
 
 Next, we will create our workflow.
-```{r}
+```{r Tree wkf}
 tree_wkf <- workflow() |>
   add_recipe(tree_recipe) |>
   add_model(tree_mod)
@@ -395,7 +395,7 @@ tree_wkf
 ```
 
 Then, we will fit the workflow to our CV folds.
-```{r}
+```{r Tree fit wkf to folds}
 set.seed(75)
 
 tree_grid <- grid_regular(cost_complexity(),
@@ -409,7 +409,7 @@ tree_fits
 ```
 
 Now that the model has been tuned, we can collect metrics to see how the models performed.
-```{r}
+```{r Tree metrics}
 tree_fits |>
   collect_metrics() |>
   filter(.metric == "rmse") |>
@@ -421,7 +421,7 @@ best_tree
 ```
 
 Finally, we will finalize our workflow and fit it to the entire training data set.
-```{r}
+```{r Tree finalize & fit}
 tree_final <- tree_wkf |>
   finalize_workflow(best_tree) |>
   last_fit(bike_split)
@@ -433,15 +433,58 @@ tree_final |>
 
 ## Bagged Tree Model
 
-We will repeat the same steps again, but instead use a **bagged tree model**. First, we’ll define our recipe and model specifications.
+We will repeat the same steps again, but instead use a **bagged tree model**. First, we’ll define our recipe, model specifications, and create the workflow.
+```{r Bag spec & wkf}
+bag_recipe <- bike_recipe_1
+
+# Model specification
+bag_spec <- bag_tree(tree_depth = 5, min_n = 10, cost_complexity = tune()) |>
+  set_engine("rpart") |>
+  set_mode("regression")
+
+# Workflow
+bag_wkf <- workflow() |>
+  add_recipe(bag_recipe) |>
+  add_model(bag_spec)
+bag_wkf
+```
+
+Next, we will move on to fitting the workflow to our CV folds and checking our metrics across the folds.
+```{r Bag fit to folds & check metrics}
+set.seed(75)
+
+bag_grid <- grid_regular(cost_complexity(), levels = 15)
+
+bag_fit <- bag_wkf |>
+  tune_grid(resamples = bike_folds,
+            grid = bag_grid)
+
+# Collect metrics
+bag_fit |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  arrange(mean)
+
+# Check metric performance
+best_bag <- bag_fit |> 
+  select_best(metric = "rmse")
+best_bag
+```
+
+Finally, we will finalize and fit the model onto the training data set.
+```{r}
+bag_final <- bag_wkf |>
+  finalize_workflow(best_bag) |>
+  last_fit(bike_split)
+
+bag_final |>
+  collect_metrics()
+```
 
 
+## Random Forest Model
 
-
-
-
-
-
+We will repeat the same steps again, but instead use a **random forest model**. First, we’ll define our recipe, model specifications, and create the workflow.
 
 
 
