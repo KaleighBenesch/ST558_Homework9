@@ -323,13 +323,15 @@ Each of these models should be fit and tuned on the training set. You should tak
       
 For the overall best model, fit it to the entire data set!
 ```{r}
+#| warning: FALSE
 library(tune)
 library(glmnet)
 library(dials)
+library(baguette)
 ```
 
 
-In this section, we will be working off of the analysis we previously did in homework 8. Using the first recipe we came up with, we will add several new models. We will begin by adding a LASSO model to fit on our bike data. In this case, we will still be using linear regression, but we will be using the "glmnet" engine instead of "lm".
+In this section, we will be working off of the analysis we previously did in homework 8. Using the first recipe we came up with, we will add several new models. We will begin by adding a **LASSO model** to fit on our bike data. In this case, we will still be using linear regression, but we will be using the "glmnet" engine instead of "lm".
 ```{r}
 LASSO_recipe <- bike_recipe_1
 
@@ -352,7 +354,6 @@ set.seed(75)
 LASSO_grid <- LASSO_wkf |>
   tune_grid(resamples = bike_folds,
             grid = grid_regular(penalty(), levels = 150)) 
-LASSO_grid
 ```
 
 Now, we want these metrics computed across the folds for each of our 150 values of the tuning parameter.
@@ -367,13 +368,85 @@ We will find the best model from our LASSO models and fit it to the entire train
 best_LASSO <- LASSO_grid |> 
   select_best(metric = "rmse")
 
-LASSO_final <- finalize_workflow(LASSO_wkf, best_LASSO)
-
-LASSO_last_fit <- last_fit(LASSO_final, bike_split) # Fit on entire training set
-
-collect_metrics(LASSO_last_fit)
+LASSO_final <- LASSO_wkf |> 
+  finalize_workflow(best_LASSO) |>
+  last_fit(bike_split)
 ```
 
 ## Regression Tree Model
+
+We will repeat the same steps, but instead use a **regression tree model**. First, we’ll define our recipe and model specifications.
+```{r}
+tree_recipe <- bike_recipe_1
+
+tree_mod <- decision_tree(tree_depth = tune(),
+                          min_n = 20,
+                          cost_complexity = tune()) |>
+  set_engine("rpart") |>
+  set_mode("regression")
+```
+
+Next, we will create our workflow.
+```{r}
+tree_wkf <- workflow() |>
+  add_recipe(tree_recipe) |>
+  add_model(tree_mod)
+tree_wkf
+```
+
+Then, we will fit the workflow to our CV folds.
+```{r}
+set.seed(75)
+
+tree_grid <- grid_regular(cost_complexity(),
+                          tree_depth(),
+                          levels = c(10, 5))
+
+tree_fits <- tree_wkf |> 
+  tune_grid(resamples = bike_folds,
+            grid = tree_grid)
+tree_fits
+```
+
+Now that the model has been tuned, we can collect metrics to see how the models performed.
+```{r}
+tree_fits |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  arrange(mean)
+
+best_tree <- tree_fits |> 
+  select_best(metric = "rmse")
+best_tree
+```
+
+Finally, we will finalize our workflow and fit it to the entire training data set.
+```{r}
+tree_final <- tree_wkf |>
+  finalize_workflow(best_tree) |>
+  last_fit(bike_split)
+
+tree_final |>
+  collect_metrics()
+```
+
+
+## Bagged Tree Model
+
+We will repeat the same steps again, but instead use a **bagged tree model**. First, we’ll define our recipe and model specifications.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
