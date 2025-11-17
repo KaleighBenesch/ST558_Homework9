@@ -490,7 +490,7 @@ rf_recipe <- bike_recipe_1
 
 # Model specification
 rf_spec <- rand_forest(mtry = tune()) |>
-  set_engine("ranger") |>
+  set_engine("ranger", importance = "permutation") |> # Added level for importance
   set_mode("regression")
 
 # Workflow
@@ -592,40 +592,46 @@ bag_final_model$imp |>
   geom_bar(stat = "identity") +
   coord_flip() +
   labs(title = "Bagged Tree Variable Importance",
-       x = "Predictor",
+       x = "Variables",
        y = "Importance")
 ```
 
 ```{r RF variable importance}
-# # Extract final model fit
-# rf_final_model <- rf_final |> extract_workflow() |> extract_fit_engine()
-# 
-# # Tibble for plotting
-# rf_var_imp_df <- tibble(
-#   term = names(rf_final_model$variable.importance),
-#   value = as.numeric(rf_final_model$variable.importance)
-# )
-# 
-# # Reorder term by importance
-# rf_var_imp_df <- rf_var_imp_df |>
-#   arrange(value) |>
-#   mutate(term = factor(term, levels = term))  # Keep order for plotting
-# 
-# 
-# ggplot(rf_var_imp_df, aes(x = term, y = value)) +
-#   geom_bar(stat = "identity") +
-#   coord_flip() +
-#   labs(title = "Random Forest Variable Importance",
-#        x = "Predictor",
-#        y = "Importance")
+# Extract final model fit
+rf_final_model <- rf_final |> extract_workflow() |> extract_fit_engine()
+
+rf_import <- rf_final_model$variable.importance |> 
+  sort(decreasing = TRUE)
+
+# Tibble for plotting
+rf_import_df <- tibble(
+  variable = names(rf_import),
+  importance = rf_import
+)
+
+rf_import_df |> 
+  ggplot(aes(x = reorder(variable, importance), y = importance)) +
+  geom_col(fill = "forestgreen") +
+  coord_flip() +
+  labs(title = "Random Forest Variable Importance",
+       x = "Variables",
+       y = "Importance")
 ```
+In both the bagged tree and random forest variable importance plots above, we can see that the most important predictor for the number of bike rentals is the average temperature (c) outside.
 
 To end, we will fit the overall best model to the entire data set. This will be our Random Forest Model.
 ```{r}
+final_rf_wkf <- rf_wkf |>
+  finalize_workflow(best_rf)
 
+final_rf_fit <- final_rf_wkf |>
+  fit(data = daily_bike_data)
+
+final_rf_model <- final_rf_fit |>
+  extract_fit_engine()
+
+final_rf_model
 ```
-
-
-
+Let's break down some of the key points of our random forest model performance. The final random forest model is a regression model that was trained on the full bike data set using 500 trees. This model is able to predict daily bike rental counts pretty accurately, with about 90.7% of the variance in predictions able to be explained and a low OOB (out of bag) prediction error (MSE) of about 0.055. As seen previously in the variable importance plot for this model, the average temperature (c) seems to be the most important variable in the data set when predicting daily bike rental counts.
 
 
