@@ -26,6 +26,7 @@ library(tidymodels)
 Today we will do some structured practice with fitting linear models in R. The data set we will be using is about bike sharing rentals in Seoul, South Korea. Let's begin by reading in this data.
 
 ```{r}
+#| results: 'hide'
 bike_data <- read_csv("SeoulBikeData.csv", locale = locale(encoding="latin1")) # Locale solves problems with special characters in other languages.
 ```
 
@@ -36,6 +37,7 @@ bike_data <- read_csv("SeoulBikeData.csv", locale = locale(encoding="latin1")) #
 Before we go fitting any models, we will conduct some basic data cleaning to prepare our data for usage. First, we will check for missing values and verify data types to make sure the columns were read in correctly.
 
 ```{r}
+#| results: 'hide'
 # Check structure of data
 str(bike_data)
 
@@ -57,8 +59,6 @@ bike_data <- bike_data |>
   mutate(Seasons = as.factor(Seasons),
          Holiday = as.factor(Holiday),
          `Functioning Day` = as.factor(`Functioning Day`))
-
-head(bike_data)
 ```
 
 Finally, we will rename all the variables to have more "user-friendly" names. For example, a column name like "Functioning Day" is not currently user-friendly because of the space between the words.
@@ -75,6 +75,7 @@ names(bike_data)
 Now that the bike data has been cleaned up, we can begin some basic exploratory data analysis (EDA). Let's start by creating some summary statistics as they relate to the bike rental count. We will view these statistics across some categorical variables as well.
 
 ```{r}
+#| results: 'hide'
 # Summary of rented_bike_count variable.
 summary(bike_data$rented_bike_count)
 
@@ -87,6 +88,7 @@ unique(bike_data$functioning_day)
 Since the `functioning_day` variable only has Yes or No values, this means that the bike sharing system was either operable or inoperable that hour. If the system was inoperable, then we get no useful information about bike rentals for that hour. In this case, we will remove observations that show the system was not operating.
 
 ```{r}
+#| results: 'hide'
 table(bike_data$functioning_day) # 295 "No " observations
 
 bike_data <- bike_data |>
@@ -109,8 +111,6 @@ daily_bike_data <- bike_data %>%
     total_rainfall_mm = sum(rainfall_mm, na.rm = TRUE),
     total_snowfall_cm = sum(snowfall_cm, na.rm = TRUE)
   )
-
-head(daily_bike_data)
 ```
 
 Now, we have a `daily_bike_data` tibble, which will be our new data that we will analyze! Let's recreate our basic summary statistics and then create some plots to explore variable relationships. We can also view a correlation matrix between our numeric variables to see if the data shows any significant correlations.
@@ -153,6 +153,7 @@ Our bike data is now ready for fitting linear regression models! First, let’s 
 For the 1st recipe, let’s ignore the `date` variable for modeling and instead use it to create a weekday/weekend (factor) variable.
 
 ```{r Recipe 1}
+#| results: 'hide'
 bike_recipe_1 <- recipe(total_bike_count ~ ., data = bike_train) |>
   step_log(total_bike_count, base = exp(1)) |> # Added log for scaling purposes.
   
@@ -175,6 +176,7 @@ summary(bike_recipe_1)
 For the 2nd recipe, we will repeat the steps above, as in recipe 1, but now we will add in **interactions** between seasons and holiday, seasons and temp, temp and rainfall.
 
 ```{r Recipe 2}
+#| results: 'hide'
 bike_recipe_2 <- recipe(total_bike_count ~ ., data = bike_train) |>
   step_log(total_bike_count, base = exp(1)) |> # Added log for scaling purposes.
   
@@ -202,6 +204,7 @@ summary(bike_recipe_2)
 For the 3rd and final recipe, we will repeat the steps above, as in recipe 2, but now we will add in **quadratic terms** for each numeric predictor.
 
 ```{r Recipe 3}
+#| results: 'hide'
 bike_recipe_3 <- recipe(total_bike_count ~ ., data = bike_train) |>
   step_log(total_bike_count, base = exp(1)) |> # Added log for scaling purposes.
   
@@ -289,6 +292,7 @@ collect_metrics(cv_wf3) # Lowest RMSE
 Since our third model seems to have the lowest RMSE, we will fit this model to the entire training data set. Then, we will compute the RMSE metric on the test set.
 
 ```{r}
+#| results: 'hide'
 best_fit <- bike_wf3 |>
   last_fit(bike_split, metrics = metric_set(rmse, mae))
 
@@ -298,6 +302,7 @@ best_fit |> collect_metrics()
 To end, we will obtain the final model (fit on the entire training set) coefficient table.
 
 ```{r}
+#| results: 'hide'
 final_model_coeffs <- best_fit |>
   extract_fit_parsnip() |>
   tidy()
@@ -308,14 +313,6 @@ final_model_coeffs
 
 
 # HW 9 - Modeling Practice
-  
-Each of these models should be fit and tuned on the training set. You should take the best model from each family of models (best LASSO, best Regression tree,. . . ) and fit it to the entire training data set and see how it predicts on the test set. Include your best MLR model from the last homework here.
-  • Compare all final models on the test set using both RMSE and MAE (mean absolute error).
-  • Extract the final model fits for each type and report a summary of each model
-    – For the LASSO and MLR models, report the final coefficient tables
-    – For the regression tree model, give a plot of the final fit
-    – For the bagged tree and random forest models, produce a variable importance plot
-      ∗ For the random forest model, this is a bit complicated. Check this out and see if you can get it to work.
       
 For the overall best model, fit it to the entire data set!
 ```{r}
@@ -348,6 +345,7 @@ LASSO_wkf
 
 Below, we will use the `tune_grid()` function. This function allows us to fit the model to CV folds but specify the set of tuning parameters to consider.
 ```{r LASSO grid}
+#| warning: FALSE
 set.seed(75)
 
 LASSO_grid <- LASSO_wkf |>
